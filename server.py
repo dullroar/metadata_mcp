@@ -289,7 +289,7 @@ from typing import Any, Optional
 from mcp.server.fastmcp import FastMCP
 
 # Check for ExifTool before anything else
-EXIFTOOL_PATH = os.environ.get("EXIFTOOL") or "exiftool.exe" if os.name == "nt" else "exiftool"
+EXIFTOOL_PATH = os.environ.get("EXIFTOOL") or ("exiftool.exe" if os.name == "nt" else "exiftool")
 
 # Verify ExifTool is installed
 def _check_exiftool() -> bool:
@@ -403,9 +403,10 @@ def write_metadata(path: str, tags: dict[str, Any]) -> dict:
     try:
         import subprocess
         # Build ExifTool command
-        cmd = [EXIFTOOL_PATH, "-overwrite", path]
+        cmd = [EXIFTOOL_PATH, "-overwrite_original"]
         for tag, value in tags.items():
-            cmd.extend(["-T", f"{tag}", "-t", str(value)])
+            cmd.append(f"-{tag}={value}")
+        cmd.append(path)
         
         result = subprocess.run(
             cmd,
@@ -461,7 +462,7 @@ def set_copyright(path: str, copyright: str, recursive: bool = False) -> dict:
     
     try:
         import subprocess
-        cmd = [EXIFTOOL_PATH, "-T", "Copyright", "-c", copyright]
+        cmd = [EXIFTOOL_PATH, "-overwrite_original", f"-Copyright={copyright}"]
         if recursive:
             cmd.append("-r")
         cmd.append(path)
@@ -520,7 +521,7 @@ def set_author(path: str, author: str) -> dict:
     try:
         import subprocess
         result = subprocess.run(
-            [EXIFTOOL_PATH, "-overwrite", "-T", "Author", "-t", author, path],
+            [EXIFTOOL_PATH, "-overwrite_original", f"-Author={author}", path],
             capture_output=True,
             text=True,
             timeout=30,
@@ -573,7 +574,7 @@ def set_description(path: str, description: str) -> dict:
     try:
         import subprocess
         result = subprocess.run(
-            [EXIFTOOL_PATH, "-overwrite", "-T", "Description", "-t", description, path],
+            [EXIFTOOL_PATH, "-overwrite_original", f"-Description={description}", path],
             capture_output=True,
             text=True,
             timeout=30,
@@ -646,15 +647,16 @@ def set_gps(path: str, latitude: float, longitude: float, latitudeRef: str = "N"
     
     try:
         import subprocess
-        cmd = [EXIFTOOL_PATH, "-overwrite", path]
-        cmd.extend(["-T", "GPSLatitude", "-t", str(abs(latitude))])
-        cmd.extend(["-T", "GPSLongitude", "-t", str(abs(longitude))])
-        cmd.extend(["-T", "GPSLatitudeRef", "-t", latitudeRef])
-        cmd.extend(["-T", "GPSLongitudeRef", "-t", longitudeRef])
-        
+        cmd = [EXIFTOOL_PATH, "-overwrite_original",
+               f"-GPSLatitude={abs(latitude)}",
+               f"-GPSLongitude={abs(longitude)}",
+               f"-GPSLatitudeRef={latitudeRef}",
+               f"-GPSLongitudeRef={longitudeRef}"]
+
         if altitude is not None:
-            cmd.extend(["-T", "GPSAltitude", "-t", str(altitude)])
-            cmd.extend(["-T", "GPSAltitudeRef", "-t", altitudeRef])
+            cmd.append(f"-GPSAltitude={altitude}")
+            cmd.append(f"-GPSAltitudeRef={altitudeRef}")
+        cmd.append(path)
         
         result = subprocess.run(
             cmd,
@@ -710,11 +712,14 @@ def copy_metadata(source: str, dest: str, only: Optional[list[str]] = None) -> d
     
     try:
         import subprocess
-        cmd = [EXIFTOOL_PATH, "-c", source, dest]
-        
+        cmd = [EXIFTOOL_PATH, "-tagsfromfile", source, "-overwrite_original"]
+
         if only:
-            # Copy only specific tags
-            cmd.extend(["-O"] + only)
+            for tag in only:
+                cmd.append(f"-{tag}")
+        else:
+            cmd.append("-all:all")
+        cmd.append(dest)
         
         result = subprocess.run(
             cmd,
@@ -861,8 +866,8 @@ def exiftool_passthrough(arguments: list[str]) -> dict:
             "message": str(e)
         }
 
-# Help command (built-in)
-@mcp.help()
+# Help command
+@mcp.tool()
 def help() -> str:
     """
     Get information about available ExifTool MCP tools.
@@ -889,8 +894,8 @@ def help() -> str:
     """
     return "ExifTool MCP Server help information"
 
-# Version command (built-in)
-@mcp.version()
+# Version command
+@mcp.tool()
 def version() -> str:
     """
     Return version information for the ExifTool MCP server.
