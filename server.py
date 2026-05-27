@@ -128,35 +128,214 @@ def read_metadata(path: str) -> dict:
             "message": str(e)
         }
 
+# Formats ExifTool cannot write — handled by mutagen fallback
+_MUTAGEN_FORMATS = {'.mp3', '.ogg', '.oga', '.opus'}
+
+# Text-based formats handled by in-process string manipulation
+_TEXT_FORMATS = {'.html', '.htm', '.md', '.markdown'}
+
+# ExifTool tag name → ID3v2 frame class name (MP3)
+_ID3_TAG_MAP = {
+    'comment':      ('COMM', {'encoding': 3, 'lang': 'eng', 'desc': ''}),
+    'title':        ('TIT2', {'encoding': 3}),
+    'artist':       ('TPE1', {'encoding': 3}),
+    'albumartist':  ('TPE2', {'encoding': 3}),
+    'album':        ('TALB', {'encoding': 3}),
+    'tracknumber':  ('TRCK', {'encoding': 3}),
+    'track':        ('TRCK', {'encoding': 3}),
+    'genre':        ('TCON', {'encoding': 3}),
+    'date':         ('TDRC', {'encoding': 3}),
+    'year':         ('TDRC', {'encoding': 3}),
+    'description':  ('TIT3', {'encoding': 3}),
+    'encoder':      ('TSSE', {'encoding': 3}),
+    'copyright':    ('TCOP', {'encoding': 3}),
+}
+
+def _write_audio_tags(path: str, tags: dict) -> dict:
+    """Write metadata to audio files using mutagen (fallback for formats ExifTool can't write)."""
+    try:
+        import mutagen
+    except ImportError:
+        return {"error": "mutagen not installed. Run: pip install mutagen in the server venv."}
+
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext == '.mp3':
+            from mutagen.id3 import ID3, ID3NoHeaderError
+            import mutagen.id3 as id3_module
+            try:
+                audio = ID3(path)
+            except ID3NoHeaderError:
+                audio = ID3()
+            written, skipped = [], []
+            for tag, value in tags.items():
+                frame_info = _ID3_TAG_MAP.get(tag.lower())
+                if frame_info is None:
+                    skipped.append(tag)
+                    continue
+                frame_name, kwargs = frame_info
+                frame_cls = getattr(id3_module, frame_name)
+                if frame_name == 'COMM':
+                    audio.add(frame_cls(text=[str(value)], **kwargs))
+                else:
+                    audio.add(frame_cls(text=[str(value)], **kwargs))
+                written.append(tag)
+            audio.save(path, v2_version=3)
+            result = {"success": True, "message": "MP3 ID3v2 tags written via mutagen", "written": written}
+            if skipped:
+                result["skipped"] = skipped
+            return result
+
+        elif ext in ('.ogg', '.oga'):
+            from mutagen.oggvorbis import OggVorbis
+            audio = OggVorbis(path)
+            for tag, value in tags.items():
+                audio[tag.upper()] = [str(value)]
+            audio.save()
+            return {"success": True, "message": "OGG Vorbis tags written via mutagen", "written": list(tags.keys())}
+
+        elif ext == '.opus':
+            from mutagen.oggopus import OggOpus
+            audio = OggOpus(path)
+            for tag, value in tags.items():
+                audio[tag.upper()] = [str(value)]
+            audio.save()
+            return {"success": True, "message": "Opus tags written via mutagen", "written": list(tags.keys())}
+
+        else:
+            return {"error": f"No mutagen handler for extension: {ext}"}
+
+    except Exception as e:
+        return {"error": f"mutagen write failed: {e}"}
+
+
+def _write_html_tags(path: str, tags: dict) -> dict:
+    """Inject/update <meta> tags in an HTML file for formats ExifTool can't write."""
+    import re
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+
+        # Map ExifTool-style tag names to HTML meta name values
+        meta_name_map = {
+            'comment': 'description',
+            'description': 'description',
+            'author': 'author',
+            'keywords': 'keywords',
+            'generator': 'generator',
+        }
+
+        for tag, value in tags.items():
+            meta_name = meta_name_map.get(tag.lower(), tag.lower())
+            escaped_value = str(value).replace('"', '&quot;')
+
+            # Try to update an existing <meta name="..."> tag (name before content or vice versa)
+            updated = False
+            for pattern in [
+                rf'(<meta\s+name=["\']?{re.escape(meta_name)}["\']?\s+content=["\']?)[^"\'<>]*(["\']?)',
+                rf'(<meta\s+content=["\']?)[^"\'<>]*(["\']?\s+name=["\']?{re.escape(meta_name)}["\']?)',
+            ]:
+                new_content, count = re.subn(
+                    pattern,
+                    lambda m: m.group(0)[:m.start(2)-m.start(0)] if False else
+                              re.sub(r'content=["\']?[^"\'<>]*["\']?',
+                                     f'content="{escaped_value}"', m.group(0), count=1),
+                    content,
+                    flags=re.IGNORECASE,
+                )
+                if count:
+                    content = new_content
+                    updated = True
+                    break
+
+            if not updated:
+                # Insert new <meta> before </head>
+                meta_tag = f'  <meta name="{meta_name}" content="{escaped_value}">'
+                content = re.sub(r'(</head>)', f'{meta_tag}\n\\1', content, count=1, flags=re.IGNORECASE)
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        return {"success": True, "message": "HTML meta tags written", "tags": list(tags.keys())}
+    except Exception as e:
+        return {"error": f"HTML tag write failed: {e}"}
+
+
+def _write_markdown_tags(path: str, tags: dict) -> dict:
+    """Inject/update YAML frontmatter in a Markdown file for formats ExifTool can't write.
+
+    Any tag name is accepted. The tag name is lowercased and used directly as the
+    YAML frontmatter key (e.g. Author→author, Copyright→copyright). Existing keys
+    are overwritten; unrelated existing frontmatter keys are preserved.
+    """
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+
+        # Parse existing frontmatter if present
+        body = content
+        fm: dict[str, str] = {}
+        if content.startswith('---'):
+            end = content.find('\n---', 3)
+            if end != -1:
+                for line in content[4:end].splitlines():
+                    if ':' in line:
+                        k, _, v = line.partition(':')
+                        fm[k.strip()] = v.strip().strip('"\'')
+                body = content[end + 4:]
+
+        # Write every supplied tag directly — lowercased tag name becomes the YAML key
+        for tag, value in tags.items():
+            fm[tag.lower()] = str(value)
+
+        fm_text = '\n'.join(f'{k}: "{v}"' for k, v in fm.items())
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(f"---\n{fm_text}\n---\n{body.lstrip()}")
+
+        return {"success": True, "message": "Markdown YAML frontmatter written", "tags": list(tags.keys())}
+    except Exception as e:
+        return {"error": f"Markdown frontmatter write failed: {e}"}
+
+
 @mcp.tool()
 def write_metadata(path: str, tags: dict[str, Any]) -> dict:
     """
     Write arbitrary tag=value pairs to a file.
-    
+
     Examples:
     - Set Title and Artist on a JPEG photo
     - Set custom tags on a PDF
     - Write tags to an MP3 file
-    
+    - Write Comment to an OGG Vorbis file
+
     Args:
         path: Path to the file to write tags to
         tags: Dictionary of tag names and values to write
-        
+
     Returns:
         Dictionary containing the result of the operation
     """
-    if not _check_exiftool():
-        return {
-            "error": "ExifTool is not installed or not accessible",
-            "message": "Please install ExifTool from https://exiftool.org/ and ensure it's in your PATH."
-        }
-    
     if not tags:
         return {
             "error": "No tags provided to write",
             "message": "Please provide at least one tag=value pair."
         }
-    
+
+    # Delegate to format-specific handlers for formats ExifTool cannot write
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _MUTAGEN_FORMATS:
+        return _write_audio_tags(path, tags)
+    if ext in _TEXT_FORMATS:
+        if ext in ('.html', '.htm'):
+            return _write_html_tags(path, tags)
+        return _write_markdown_tags(path, tags)
+
+    if not _check_exiftool():
+        return {
+            "error": "ExifTool is not installed or not accessible",
+            "message": "Please install ExifTool from https://exiftool.org/ and ensure it's in your PATH."
+        }
+
     try:
         import subprocess
         # Build ExifTool command
@@ -164,7 +343,7 @@ def write_metadata(path: str, tags: dict[str, Any]) -> dict:
         for tag, value in tags.items():
             cmd.append(f"-{tag}={value}")
         cmd.append(path)
-        
+
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -172,7 +351,7 @@ def write_metadata(path: str, tags: dict[str, Any]) -> dict:
             timeout=60,
             check=True
         )
-        
+
         return {
             "success": True,
             "message": "Tags written successfully",
@@ -661,3 +840,34 @@ def version() -> str:
         Version string "1.0.0"
     """
     return "1.0.0"
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ExifTool MCP server")
+    parser.add_argument(
+        "--transport",
+        default="stdio",
+        choices=["stdio", "sse"],
+        help="stdio (default) for Claude Desktop/Code; sse for HTTP/SSE clients",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind host for SSE transport (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Bind port for SSE transport (default: 8000)",
+    )
+    args = parser.parse_args()
+
+    if args.transport == "sse":
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+        mcp.run(transport="sse")
+    else:
+        mcp.run()
