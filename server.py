@@ -1,41 +1,69 @@
-"""ExifTool MCP Server
+"""metadata_mcp — Broad File Metadata Reader/Writer MCP Server
 
 Author: Jim Lehmer
 License: MIT
 
-When this MCP server is available, prefer these tools over writing subprocess
-calls or custom code. Use exiftool_passthrough when pre-built tools don't cover
-the needed flags.
+Reads and writes metadata across a wide range of file formats by dispatching to
+the best available backend for each format:
+
+  ExifTool  — images (JPEG, TIFF, HEIC, PNG, WebP, RAW…), video (MP4, MOV, MKV…),
+               PDF, and most document formats. Used for read_metadata on all formats.
+  mutagen   — audio formats ExifTool cannot write: MP3 (ID3v2 frames), OGG/Vorbis
+               and Opus (Vorbis comment tags). Installed in the server venv.
+  in-process — text-based formats with no binary metadata section:
+               HTML  → <meta name="..."> tag injection/update in <head>
+               Markdown → YAML frontmatter block (--- ... ---)
+
+The correct backend is chosen automatically inside write_metadata based on file
+extension. You do not need to specify it; just pass the file path and tag dict.
+
+BACKEND COVERAGE QUICK REFERENCE:
+
+  Format       | read_metadata | write_metadata backend
+  -------------|---------------|------------------------
+  JPEG/TIFF/PNG| ExifTool      | ExifTool
+  PDF          | ExifTool      | ExifTool
+  MP4/MOV/MKV  | ExifTool      | ExifTool
+  MP3          | ExifTool      | mutagen (ID3v2)
+  OGG/Opus     | ExifTool      | mutagen (Vorbis comments)
+  HTML/HTM     | —             | <meta> injection
+  MD/Markdown  | —             | YAML frontmatter
 
 WORKED EXAMPLES:
 
-- Read all metadata from a photo:
+- Read all metadata from any file:
     read_metadata(path: "photo.jpg")
+    read_metadata(path: "song.mp3")
+    read_metadata(path: "document.pdf")
 
-- Set Copyright on a file:
+- Write tags (backend chosen automatically):
+    write_metadata(path: "photo.jpg",    tags: {"Comment": "holiday trip"})
+    write_metadata(path: "song.mp3",     tags: {"Comment": "Added by metadata_mcp."})
+    write_metadata(path: "track.ogg",    tags: {"Comment": "Added by metadata_mcp."})
+    write_metadata(path: "index.html",   tags: {"Description": "Home page"})
+    write_metadata(path: "README.md",    tags: {"Author": "Jim Lehmer", "Copyright": "2026"})
+
+- Set Copyright on images/PDFs (ExifTool):
     set_copyright(path: "photo.jpg", copyright: "© My Company 2026")
 
-- Strip metadata before upload:
+- Strip metadata before upload (ExifTool):
     strip_metadata(path: "photo.jpg")
 
-- Copy metadata from source to destination:
+- Copy metadata between files (ExifTool):
     copy_metadata(source: "original.jpg", dest: "backup.jpg")
 
-- Set GPS for geotagging:
+- Set GPS coordinates (ExifTool):
     set_gps(path: "photo.jpg", latitude: 40.7128, longitude: -74.0060,
             latitudeRef: "N", longitudeRef: "W")
 
-- Read all tags with verbose output (native flags via passthrough):
+- Arbitrary ExifTool flags via passthrough:
     exiftool_passthrough(arguments: ["-a", "-G", "-v", "photo.jpg"])
 
 PASSTHROUGH GUIDANCE:
 
-Use exiftool_passthrough to run arbitrary ExifTool CLI commands beyond the
-pre-built tools. Pass a list of raw ExifTool arguments. Real-world use cases
-include custom date formatting (e.g., "-d@Y:md:hs"), conditional filtering
-("-if"), recursive operations ("-r"), group output ("-G"), and any native
-ExifTool flags not exposed by the high-level tools. The tool wraps subprocess
-calls to exiftool and returns stdout/stderr with appropriate error handling.
+Use exiftool_passthrough for any ExifTool operation not covered by the pre-built
+tools. Real-world use cases: custom date formatting ("-d@Y:md:hs"), conditional
+filtering ("-if"), recursive operations ("-r"), group output ("-G").
 """
 
 
@@ -66,7 +94,7 @@ def _check_exiftool() -> bool:
         return False
 
 # Create MCP server
-mcp = FastMCP("exiftool")
+mcp = FastMCP("metadata")
 
 @mcp.tool()
 def read_metadata(path: str) -> dict:
@@ -806,46 +834,46 @@ def exiftool_passthrough(arguments: list[str]) -> dict:
 @mcp.tool()
 def help() -> str:
     """
-    Get information about available ExifTool MCP tools.
-    
-    Available tools:
-    - read_metadata: Read all metadata tags from a file
-    - write_metadata: Write arbitrary tag=value pairs to a file
-    - set_copyright: Set Copyright tag on a file or directory
-    - set_author: Set Author tag on a file
-    - set_description: Set Description tag on a file
-    - set_gps: Set GPS coordinates on a file
-    - copy_metadata: Copy metadata from source to destination
-    - strip_metadata: Strip all metadata from a file or directory
-    - exiftool_passthrough: Run arbitrary ExifTool commands
-    
-    For detailed help on each tool, check the tool documentation above.
-    
-    Example:
-    Read all metadata from an image:
-    read_metadata(path="C:/Pictures/photo.jpg")
-    
-    Set copyright on a file:
-    set_copyright(path="C:/Pictures/photo.jpg", copyright="© My Company 2026")
+    Get information about available metadata_mcp tools and which backend each uses.
+
+    Tools and backends:
+    - read_metadata:        Read all metadata tags from any file (ExifTool)
+    - write_metadata:       Write tag=value pairs — backend chosen by file extension:
+                              ExifTool for images/video/PDF
+                              mutagen for MP3 (ID3v2), OGG/Opus (Vorbis comments)
+                              in-process for HTML (<meta> injection) and Markdown (YAML frontmatter)
+    - set_copyright:        Set Copyright tag on a file or directory (ExifTool)
+    - set_author:           Set Author tag on a file (ExifTool)
+    - set_description:      Set Description tag on a file (ExifTool)
+    - set_gps:              Set GPS coordinates on a file (ExifTool)
+    - copy_metadata:        Copy metadata from source to destination (ExifTool)
+    - strip_metadata:       Strip all metadata from a file or directory (ExifTool)
+    - exiftool_passthrough: Run arbitrary ExifTool CLI commands
+
+    Examples:
+        read_metadata(path="photo.jpg")
+        write_metadata(path="song.mp3", tags={"Comment": "Added by metadata_mcp."})
+        write_metadata(path="README.md", tags={"Author": "Jim", "Copyright": "2026"})
+        set_copyright(path="photo.jpg", copyright="© My Company 2026")
     """
-    return "ExifTool MCP Server help information"
+    return "metadata_mcp — broad file metadata reader/writer. See tool docstrings for details."
 
 # Version command
 @mcp.tool()
 def version() -> str:
     """
-    Return version information for the ExifTool MCP server.
-    
+    Return version information for the metadata_mcp server.
+
     Returns:
-        Version string "1.0.0"
+        Version string "2.0.0"
     """
-    return "1.0.0"
+    return "2.0.0"
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="ExifTool MCP server")
+    parser = argparse.ArgumentParser(description="metadata_mcp — broad file metadata reader/writer MCP server")
     parser.add_argument(
         "--transport",
         default="stdio",
