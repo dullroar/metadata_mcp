@@ -60,6 +60,34 @@ For formats with no binary metadata section:
 
 ---
 
+## Bulk Operations
+
+ExifTool-backed tools accept **glob patterns** and **directory paths** natively — ExifTool handles the expansion. This covers `read_metadata`, `set_copyright`, `strip_metadata`, `set_author`, `set_description`, `set_gps`, `copy_metadata`, and `write_metadata` for images/video/PDF.
+
+For `write_metadata` on audio (MP3/OGG/Opus) and text (HTML/Markdown) formats, the server expands globs in Python before dispatching to the format-specific backend. All bulk operations happen in a single tool call — no loop needed.
+
+```python
+# Read metadata from every photo — one call, no loop
+read_metadata(path="photos/*.jpg")
+
+# Set copyright on every photo — one call, no loop
+set_copyright(path="photos/*.jpg", copyright="© 2026 Jim Lehmer")
+
+# Strip metadata from every export — one call, no loop
+strip_metadata(path="exports/*.jpg")
+
+# Write ID3 tags to every MP3 — one call, no loop
+write_metadata(path="music/*.mp3", tags={"Artist": "Jim Lehmer", "Album": "Demo"})
+
+# Write EXIF to every JPEG — one call, no loop
+write_metadata(path="photos/*.jpg", tags={"Copyright": "© 2026"})
+
+# Recursive operation via passthrough
+exiftool_passthrough(arguments=["-r", "-all=", "exports/"])
+```
+
+---
+
 ## Tools
 
 ### `read_metadata`
@@ -214,11 +242,15 @@ python server.py --transport sse
 ## Example Prompts
 
 - *"Read all the metadata from this photo and tell me what camera was used."*
+- *"Read the metadata from every photo in photos/ and summarize what cameras were used."*
 - *"Set the Comment field on this MP3 to 'ripped from vinyl'."*
+- *"Set the Artist and Album on every MP3 in music/ to 'Jim Lehmer' and 'Demo'."*
 - *"Add an Author and Copyright field to this Markdown file."*
 - *"Inject a description meta tag into this HTML page."*
+- *"Set copyright on every JPEG in photos/ to '© 2026 Jim Lehmer'."*
 - *"Copy all metadata from original.jpg to backup.jpg."*
 - *"Strip all metadata from this file before uploading."*
+- *"Strip all metadata from every JPEG in exports/ before I upload them."*
 - *"Set my GPS coordinates on this photo to geotag my travels."*
 
 ---
