@@ -22,17 +22,23 @@ exact path. It combines filesystem attributes, libmagic content detection, and
 Git context. Use read_metadata afterwards only when embedded, format-specific
 tags (EXIF, ID3, PDF properties, and similar) are actually needed.
 
+For semantic attributes in text-centric documents, read_document_attributes
+uses Pandoc's JSON AST. It is intentionally complementary to read_metadata:
+Pandoc handles Markdown, HTML, RST, Org, LaTeX, notebooks, and related markup;
+ExifTool remains the authoritative route for PDF and Office/OOXML container
+properties, including Word custom properties Pandoc may omit.
+
 BACKEND COVERAGE QUICK REFERENCE:
 
-  Format       | read_metadata | write_metadata backend
-  -------------|---------------|------------------------
-  JPEG/TIFF/PNG| ExifTool      | ExifTool
-  PDF          | ExifTool      | ExifTool
-  MP4/MOV/MKV  | ExifTool      | ExifTool
-  MP3          | ExifTool      | mutagen (ID3v2)
-  OGG/Opus     | ExifTool      | mutagen (Vorbis comments)
-  HTML/HTM     | —             | <meta> injection
-  MD/Markdown  | —             | YAML frontmatter
+  Format                 | read_metadata | read_document_attributes | write_metadata backend
+  -----------------------|---------------|--------------------------|------------------------
+  JPEG/TIFF/PNG          | ExifTool      | —                        | ExifTool
+  PDF/Office/OOXML/ODF   | ExifTool      | Use read_metadata        | ExifTool where supported
+  MP4/MOV/MKV            | ExifTool      | —                        | ExifTool
+  MP3                    | ExifTool      | —                        | mutagen (ID3v2)
+  OGG/Opus               | ExifTool      | —                        | mutagen (Vorbis comments)
+  HTML/HTM/XHTML         | ExifTool raw  | Pandoc semantic fields   | <meta> injection
+  MD/RST/Org/LaTeX/etc.  | Limited/none  | Pandoc semantic fields   | YAML frontmatter for Markdown
 
 BULK OPERATIONS (pass a glob, skip the loop)
 =============================================
@@ -59,6 +65,11 @@ WORKED EXAMPLES:
     read_metadata(path: "photo.jpg")
     read_metadata(path: "song.mp3")
     read_metadata(path: "document.pdf")
+
+- Read compact semantic document attributes (Pandoc, one exact path):
+    read_document_attributes(path: "document.md")
+    read_document_attributes(path: "page.html")
+    read_document_attributes(path: "analysis.ipynb", include_full_metadata=True)
 
 - Write tags (backend chosen automatically):
     write_metadata(path: "photo.jpg",    tags: {"Comment": "holiday trip"})
@@ -95,6 +106,7 @@ filtering ("-if"), recursive operations ("-r"), group output ("-G").
 
 
 import glob as _glob
+import json
 import mimetypes
 import os
 import shutil
@@ -132,11 +144,148 @@ mcp = FastMCP(
     "metadata",
     instructions=(
         "For an exact path, call inspect_file first for compact filesystem, "
-        "content-type, and Git context. Call read_metadata only when embedded "
-        "format-specific tags are needed. Request Git blame only with a small, "
-        "explicit line range."
+        "content-type, and Git context. Use read_document_attributes for "
+        "semantic metadata in supported text documents; use read_metadata for "
+        "embedded or container metadata, especially PDF and Office/OOXML. "
+        "Request Git blame only with a small, explicit line range."
     ),
 )
+
+
+# Text-centric readers where Pandoc exposes document semantics that are absent
+# from, or less useful than, raw ExifTool metadata. Values are Pandoc reader names.
+_PANDOC_ATTRIBUTE_EXTENSIONS = {
+    ".md": "markdown", ".markdown": "markdown", ".mdown": "markdown",
+    ".mkdn": "markdown", ".mdwn": "markdown", ".mdtxt": "markdown",
+    ".html": "html", ".htm": "html", ".xhtml": "html",
+    ".rst": "rst", ".rest": "rst", ".org": "org", ".rtf": "rtf",
+    ".tex": "latex", ".latex": "latex", ".ipynb": "ipynb",
+    ".dbk": "docbook", ".docbook": "docbook", ".jats": "jats",
+    ".nxml": "jats", ".opml": "opml", ".mediawiki": "mediawiki",
+    ".wiki": "mediawiki", ".textile": "textile", ".creole": "creole",
+    ".twiki": "twiki", ".dokuwiki": "dokuwiki", ".tikiwiki": "tikiwiki",
+    ".t2t": "t2t", ".muse": "muse", ".vimwiki": "vimwiki", ".jira": "jira",
+}
+
+# ExifTool already gives richer, container-native properties for these formats.
+_EXIFTOOL_DOCUMENT_EXTENSIONS = {
+    ".pdf", ".doc", ".dot", ".docm", ".docx", ".dotm", ".dotx",
+    ".xls", ".xla", ".xlsb", ".xlsm", ".xlsx", ".xlt", ".xltm", ".xltx",
+    ".ppt", ".pot", ".pps", ".pptm", ".pptx", ".potm", ".potx", ".ppsm", ".ppsx",
+    ".odt", ".ods", ".odp", ".odf", ".ott", ".ots", ".otp", ".epub",
+}
+
+
+def _load_pypandoc() -> tuple[Any | None, str | None]:
+    """Load the optional Pandoc binding without making server startup depend on it."""
+    try:
+        import pypandoc
+        return pypandoc, None
+    except ImportError:
+        return None, "pypandoc is not installed. Run: pip install -r requirements.txt"
+
+
+def _pandoc_inline_text(inlines: list[dict]) -> str:
+    """Render common Pandoc inline nodes to compact plain text for metadata values."""
+    output: list[str] = []
+    for inline in inlines:
+        node_type = inline.get("t")
+        contents = inline.get("c")
+        if node_type == "Str":
+            output.append(str(contents))
+        elif node_type == "Space":
+            output.append(" ")
+        elif node_type in {"SoftBreak", "LineBreak"}:
+            output.append("\n")
+        elif node_type in {"Code", "Math", "RawInline"} and isinstance(contents, list) and len(contents) > 1:
+            output.append(str(contents[1]))
+        elif node_type in {"Emph", "Strong", "Strikeout", "SmallCaps", "Underline", "Span"}:
+            nested = contents[-1] if isinstance(contents, list) else contents
+            if isinstance(nested, list):
+                output.append(_pandoc_inline_text(nested))
+        elif node_type in {"Link", "Image"} and isinstance(contents, list):
+            nested = contents[-2] if len(contents) > 1 else []
+            if isinstance(nested, list):
+                output.append(_pandoc_inline_text(nested))
+        elif node_type in {"Cite", "Quoted"} and isinstance(contents, list):
+            nested = contents[-1] if contents else []
+            if isinstance(nested, list):
+                output.append(_pandoc_inline_text(nested))
+    return "".join(output).strip()
+
+
+def _pandoc_blocks_text(blocks: list[dict]) -> str:
+    """Render common Pandoc block nodes to compact plain text for metadata values."""
+    output: list[str] = []
+    for block in blocks:
+        node_type = block.get("t")
+        contents = block.get("c")
+        text = ""
+        if node_type in {"Plain", "Para"} and isinstance(contents, list):
+            text = _pandoc_inline_text(contents)
+        elif node_type == "Header" and isinstance(contents, list) and len(contents) > 2:
+            text = _pandoc_inline_text(contents[2])
+        elif node_type == "CodeBlock" and isinstance(contents, list) and len(contents) > 1:
+            text = str(contents[1])
+        elif node_type == "BlockQuote" and isinstance(contents, list):
+            text = _pandoc_blocks_text(contents)
+        if text:
+            output.append(text)
+    return "\n".join(output)
+
+
+def _normalize_pandoc_meta(value: dict) -> tuple[bool, Any]:
+    """Convert compact Pandoc metadata values; decline nested maps by default."""
+    node_type = value.get("t")
+    contents = value.get("c")
+    if node_type == "MetaString":
+        return True, str(contents)
+    if node_type == "MetaBool":
+        return True, bool(contents)
+    if node_type == "MetaInlines" and isinstance(contents, list):
+        return True, _pandoc_inline_text(contents)
+    if node_type == "MetaBlocks" and isinstance(contents, list):
+        return True, _pandoc_blocks_text(contents)
+    if node_type == "MetaList" and isinstance(contents, list):
+        normalized: list[Any] = []
+        for item in contents:
+            if not isinstance(item, dict):
+                return False, None
+            supported, rendered = _normalize_pandoc_meta(item)
+            if not supported:
+                return False, None
+            normalized.append(rendered)
+        return True, normalized
+    # MetaMap can be arbitrarily deep (notably Jupyter metadata), so it belongs
+    # behind include_full_metadata rather than in the default agent context.
+    return False, None
+
+
+def _pandoc_reader_for(path: Path, source_format: str | None) -> tuple[str | None, dict | None]:
+    """Choose a Pandoc reader or explain why ExifTool/explicit input is required."""
+    extension = path.suffix.lower()
+    if extension in _EXIFTOOL_DOCUMENT_EXTENSIONS:
+        return None, {
+            "status": "not_applicable",
+            "recommended_tool": "read_metadata",
+            "reason": "ExifTool provides richer embedded and container properties for this format; Pandoc may omit them.",
+        }
+    if source_format:
+        reader = source_format.split("+", 1)[0]
+        if reader in {"docx", "odt", "epub"}:
+            return None, {
+                "status": "not_applicable",
+                "recommended_tool": "read_metadata",
+                "reason": "ExifTool provides richer embedded and container properties for this format; Pandoc may omit them.",
+            }
+        return source_format, None
+    reader = _PANDOC_ATTRIBUTE_EXTENSIONS.get(extension)
+    if reader:
+        return reader, None
+    return None, {
+        "status": "unsupported",
+        "reason": "No semantic-document reader is inferred for this extension. Supply source_format for a supported Pandoc text reader, or use read_metadata for embedded metadata.",
+    }
 
 
 def _run_readonly_command(arguments: list[str], timeout: int = 5) -> tuple[int | None, str, str, str | None]:
@@ -456,6 +605,112 @@ def inspect_file(
         result["git"] = _git_info(absolute_path, blame_start_line, blame_end_line)
     except Exception as exc:
         result["git"] = {"status": "error", "error": f"Git inspection failed: {exc}"}
+    return result
+
+
+@mcp.tool()
+def read_document_attributes(
+    path: str,
+    source_format: Optional[str] = None,
+    include_full_metadata: bool = False,
+) -> dict:
+    """Read compact semantic document attributes through Pandoc's JSON AST.
+
+    Use this for text-centric document formats such as Markdown, HTML/XHTML,
+    RST, Org, RTF, LaTeX, Jupyter notebooks, DocBook/JATS, OPML, and supported
+    wiki markup. It returns normalized document semantics such as title, author,
+    date, language, description, keywords, and scalar/list custom attributes.
+
+    This tool intentionally does not handle PDF, Word/OOXML, OpenDocument, or
+    EPUB files. Use read_metadata for those formats: ExifTool preserves richer
+    embedded, container, and custom properties that Pandoc may omit.
+
+    Args:
+        path: One exact document path. Glob patterns are not expanded.
+        source_format: Optional Pandoc input format when the extension is
+            ambiguous or non-standard (for example, "markdown" or "mediawiki").
+        include_full_metadata: If True, include Pandoc's lossless raw metadata
+            AST. Defaults to False to keep nested metadata context-bounded.
+
+    Returns:
+        A dict containing normalized attributes, Pandoc version and selected
+        reader, plus explicit omitted-key or parse/dependency information.
+    """
+    document_path = Path(path).expanduser()
+    if not document_path.is_file():
+        return {
+            "status": "missing",
+            "error": "Path does not exist or is not a regular file",
+        }
+
+    reader, routing_result = _pandoc_reader_for(document_path, source_format)
+    if routing_result:
+        return routing_result
+
+    pypandoc, dependency_error = _load_pypandoc()
+    if dependency_error:
+        return {
+            "status": "unavailable",
+            "error": dependency_error,
+            "message": "Pandoc must also be installed and available on PATH.",
+        }
+
+    try:
+        pandoc_version = str(pypandoc.get_pandoc_version())
+        input_formats, _ = pypandoc.get_pandoc_formats()
+        reader_base = reader.split("+", 1)[0].split("-", 1)[0]
+        if reader_base not in input_formats:
+            return {
+                "status": "unsupported",
+                "source_format": reader,
+                "reason": f"The installed Pandoc {pandoc_version} does not support this input reader.",
+            }
+        raw_document = pypandoc.convert_file(str(document_path), "json", format=reader)
+        document = json.loads(raw_document)
+        metadata = document.get("meta")
+        if not isinstance(metadata, dict):
+            return {
+                "status": "error",
+                "backend": "pandoc",
+                "pandoc_version": pandoc_version,
+                "source_format": reader,
+                "error": "Pandoc returned JSON without a metadata object.",
+            }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "backend": "pandoc",
+            "source_format": reader,
+            "error": f"Pandoc document-attribute extraction failed: {exc}",
+        }
+
+    attributes: dict[str, Any] = {}
+    omitted_attributes: list[dict[str, str]] = []
+    for key, value in metadata.items():
+        if not isinstance(value, dict):
+            omitted_attributes.append({"key": key, "reason": "Pandoc returned an unrecognized metadata value."})
+            continue
+        supported, normalized_value = _normalize_pandoc_meta(value)
+        if supported:
+            attributes[key] = normalized_value
+        else:
+            omitted_attributes.append({
+                "key": key,
+                "reason": "Nested or unsupported metadata is omitted from compact output; set include_full_metadata=true to receive its raw AST.",
+            })
+
+    result: dict[str, Any] = {
+        "status": "ok",
+        "backend": "pandoc",
+        "pandoc_version": pandoc_version,
+        "source_format": reader,
+        "attributes": attributes,
+        "omitted_attributes": omitted_attributes,
+    }
+    if omitted_attributes:
+        result["warnings"] = ["Some nested metadata was omitted to keep the default response context-bounded."]
+    if include_full_metadata:
+        result["full_metadata"] = metadata
     return result
 
 
@@ -1038,6 +1293,10 @@ def help() -> str:
     - inspect_file:         Compact first-call context for one path: filesystem
                               attributes, libmagic type detection, and Git state.
                               Optional Git blame requires explicit line bounds.
+    - read_document_attributes:
+                            Compact Pandoc semantic attributes for Markdown, HTML,
+                              RST, Org, LaTeX, notebooks, and related markup.
+                              PDF, Office/OOXML, ODF, and EPUB use read_metadata.
     - read_metadata:        Read all metadata tags from any file (ExifTool — accepts globs)
     - write_metadata:       Write tag=value pairs — backend chosen by file extension:
                               ExifTool for images/video/PDF (accepts globs/dirs natively)
@@ -1058,13 +1317,13 @@ def help() -> str:
         write_metadata(path="music/*.mp3", tags={"Artist": "Jim Lehmer"})
         exiftool_passthrough(arguments=["-r", "-all=", "exports/"])
     """
-    return "metadata_mcp — use inspect_file first for compact filesystem, type, and Git context; use read_metadata for embedded format-specific tags. See tool docstrings for details."
+    return "metadata_mcp — use inspect_file first; read_document_attributes for semantic text-document fields; and read_metadata for embedded/container tags, especially PDF and Office/OOXML. See tool docstrings for details."
 
 
 @mcp.tool()
 def version() -> str:
     """Return version information for the metadata_mcp server."""
-    return "2.1.0"
+    return "2.2.0"
 
 
 if __name__ == "__main__":
