@@ -17,6 +17,11 @@ the best available backend for each format:
 The correct backend is chosen automatically inside write_metadata based on file
 extension. You do not need to specify it; just pass the file path and tag dict.
 
+For coding agents, inspect_file is the compact, read-only first call for any
+exact path. It combines filesystem attributes, libmagic content detection, and
+Git context. Use read_metadata afterwards only when embedded, format-specific
+tags (EXIF, ID3, PDF properties, and similar) are actually needed.
+
 BACKEND COVERAGE QUICK REFERENCE:
 
   Format       | read_metadata | write_metadata backend
@@ -90,8 +95,12 @@ filtering ("-if"), recursive operations ("-r"), group output ("-G").
 
 
 import glob as _glob
-import sys
+import mimetypes
 import os
+import shutil
+import stat
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from mcp.server.fastmcp import FastMCP
@@ -119,7 +128,335 @@ def _expand(pattern: str) -> list[str]:
     return [pattern]
 
 
-mcp = FastMCP("metadata")
+mcp = FastMCP(
+    "metadata",
+    instructions=(
+        "For an exact path, call inspect_file first for compact filesystem, "
+        "content-type, and Git context. Call read_metadata only when embedded "
+        "format-specific tags are needed. Request Git blame only with a small, "
+        "explicit line range."
+    ),
+)
+
+
+def _run_readonly_command(arguments: list[str], timeout: int = 5) -> tuple[int | None, str, str, str | None]:
+    """Run a fixed-argument local command and return a non-throwing result."""
+    try:
+        result = subprocess.run(
+            arguments,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return result.returncode, result.stdout, result.stderr, None
+    except FileNotFoundError:
+        return None, "", "", f"Command not found: {arguments[0]}"
+    except subprocess.TimeoutExpired:
+        return None, "", "", f"Command timed out after {timeout} seconds: {arguments[0]}"
+    except OSError as exc:
+        return None, "", "", f"Could not run {arguments[0]}: {exc}"
+
+
+def _utc_timestamp(timestamp: float) -> str:
+    """Format a POSIX timestamp as an unambiguous UTC ISO-8601 value."""
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _file_kind(mode: int) -> str:
+    """Return a portable name for a stat mode's file kind."""
+    if stat.S_ISREG(mode):
+        return "file"
+    if stat.S_ISDIR(mode):
+        return "directory"
+    if stat.S_ISLNK(mode):
+        return "symlink"
+    if stat.S_ISCHR(mode):
+        return "character_device"
+    if stat.S_ISBLK(mode):
+        return "block_device"
+    if stat.S_ISFIFO(mode):
+        return "fifo"
+    if stat.S_ISSOCK(mode):
+        return "socket"
+    return "other"
+
+
+def _filesystem_info(file_path: Path) -> dict:
+    """Collect lstat-based attributes without following symlinks."""
+    try:
+        attributes = file_path.lstat()
+    except FileNotFoundError:
+        return {"status": "missing", "error": "Path does not exist"}
+    except OSError as exc:
+        return {"status": "error", "error": f"Cannot stat path: {exc}"}
+
+    is_symlink = stat.S_ISLNK(attributes.st_mode)
+    result: dict[str, Any] = {
+        "status": "ok",
+        "kind": _file_kind(attributes.st_mode),
+        "is_symlink": is_symlink,
+        "size_bytes": attributes.st_size,
+        "allocated_bytes": getattr(attributes, "st_blocks", 0) * 512 if hasattr(attributes, "st_blocks") else None,
+        "mode": f"0o{stat.S_IMODE(attributes.st_mode):03o}",
+        "permissions": stat.filemode(attributes.st_mode),
+        "timestamps": {
+            "accessed_at": _utc_timestamp(attributes.st_atime),
+            "modified_at": _utc_timestamp(attributes.st_mtime),
+            # On Unix this is inode/status-change time; on Windows it is creation time.
+            "changed_at": _utc_timestamp(attributes.st_ctime),
+        },
+    }
+    if os.name == "posix":
+        result["owner"] = {"uid": attributes.st_uid, "gid": attributes.st_gid}
+    if is_symlink:
+        try:
+            result["symlink_target"] = os.readlink(file_path)
+            result["symlink_target_exists"] = file_path.exists()
+        except OSError as exc:
+            result["symlink_error"] = str(exc)
+    return result
+
+
+def _content_type_info(file_path: Path, filesystem: dict) -> dict:
+    """Use libmagic's file(1) when available; label extension fallback clearly."""
+    if filesystem.get("status") != "ok":
+        return {"status": "not_applicable", "reason": "Path is not accessible"}
+    if filesystem.get("kind") not in {"file", "symlink"}:
+        return {"status": "not_applicable", "reason": "Content detection applies to files only"}
+    if filesystem.get("is_symlink") and not filesystem.get("symlink_target_exists"):
+        return {"status": "not_applicable", "reason": "Symlink target does not exist"}
+
+    file_command = shutil.which("file")
+    if not file_command:
+        mime_type, encoding = mimetypes.guess_type(str(file_path))
+        return {
+            "status": "fallback",
+            "detection": "extension_fallback",
+            "mime_type": mime_type,
+            "encoding": encoding,
+            "description": None,
+            "note": "libmagic file command is unavailable; values were inferred from the extension.",
+        }
+
+    mime_rc, mime_stdout, mime_stderr, mime_error = _run_readonly_command(
+        [file_command, "--brief", "--dereference", "--mime", "--", str(file_path)]
+    )
+    description_rc, description_stdout, description_stderr, description_error = _run_readonly_command(
+        [file_command, "--brief", "--dereference", "--", str(file_path)]
+    )
+    if mime_error or description_error or mime_rc != 0 or description_rc != 0:
+        detail = mime_error or description_error or mime_stderr.strip() or description_stderr.strip()
+        return {
+            "status": "error",
+            "detection": "libmagic",
+            "error": detail or "file command could not identify the path",
+        }
+
+    mime_value = mime_stdout.strip()
+    mime_type, _, charset = mime_value.partition("; charset=")
+    return {
+        "status": "ok",
+        "detection": "libmagic",
+        "mime_type": mime_type or None,
+        "encoding": charset or None,
+        "description": description_stdout.strip() or None,
+    }
+
+
+def _git_last_commit(repo_root: str, relative_path: str) -> dict | None:
+    """Return the latest commit affecting one path, following a single rename chain."""
+    rc, stdout, stderr, error = _run_readonly_command(
+        [
+            "git", "-C", repo_root, "log", "-1", "--follow",
+            "--format=%H%x00%an%x00%ae%x00%aI%x00%s", "--", relative_path,
+        ]
+    )
+    if error or rc != 0:
+        return {"error": error or stderr.strip() or "Could not read file history"}
+    values = stdout.rstrip("\n").split("\x00") if stdout else []
+    if len(values) != 5:
+        return None
+    return {
+        "hash": values[0],
+        "author": {"name": values[1], "email": values[2]},
+        "authored_at": values[3],
+        "subject": values[4],
+    }
+
+
+def _parse_git_blame(output: str) -> list[dict]:
+    """Parse porcelain blame output into one compact attribution object per line."""
+    lines: list[dict] = []
+    current: dict[str, Any] = {}
+    for raw_line in output.splitlines():
+        if raw_line.startswith("\t"):
+            if "final_line" in current:
+                lines.append({
+                    "line": current["final_line"],
+                    "commit": current.get("commit"),
+                    "author": {
+                        "name": current.get("author"),
+                        "email": current.get("author_email"),
+                        "authored_at": current.get("authored_at"),
+                    },
+                    "summary": current.get("summary"),
+                })
+            current = {}
+            continue
+        if raw_line.startswith(("author ", "author-mail ", "author-time ", "summary ")):
+            key, value = raw_line.split(" ", 1)
+            mapped_key = {"author": "author", "author-mail": "author_email", "author-time": "authored_at", "summary": "summary"}[key]
+            if mapped_key == "authored_at":
+                current[mapped_key] = _utc_timestamp(float(value))
+            else:
+                current[mapped_key] = value.strip("<>")
+            continue
+        fields = raw_line.split()
+        if len(fields) >= 3 and len(fields[0]) in {40, 64} and all(c in "0123456789abcdef" for c in fields[0].lower()):
+            current = {"commit": fields[0], "final_line": int(fields[2])}
+    return lines
+
+
+def _git_info(file_path: Path, blame_start_line: int | None, blame_end_line: int | None) -> dict:
+    """Gather read-only Git context for a file, optionally including bounded blame."""
+    start_directory = file_path if file_path.is_dir() else file_path.parent
+    rc, stdout, stderr, error = _run_readonly_command(
+        ["git", "-C", str(start_directory), "rev-parse", "--show-toplevel"]
+    )
+    if error:
+        return {"status": "unavailable", "error": error}
+    if rc != 0:
+        return {"status": "not_repository", "reason": "Path is not inside a Git work tree"}
+
+    repo_root = stdout.strip()
+    relative_path = os.path.relpath(file_path, repo_root)
+    branch_rc, branch_stdout, _, _ = _run_readonly_command(
+        ["git", "-C", repo_root, "symbolic-ref", "--quiet", "--short", "HEAD"]
+    )
+    head_rc, head_stdout, head_stderr, head_error = _run_readonly_command(
+        ["git", "-C", repo_root, "rev-parse", "HEAD"]
+    )
+    tracked_rc, _, _, _ = _run_readonly_command(
+        ["git", "-C", repo_root, "ls-files", "--error-unmatch", "--", relative_path]
+    )
+    status_rc, status_stdout, status_stderr, status_error = _run_readonly_command(
+        ["git", "-C", repo_root, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching", "--", relative_path]
+    )
+    if status_error or status_rc != 0:
+        return {"status": "error", "repository_root": repo_root, "error": status_error or status_stderr.strip()}
+
+    porcelain = status_stdout.splitlines()[0] if status_stdout.splitlines() else ""
+    xy = porcelain[:2] if porcelain else "  "
+    if xy == "??":
+        worktree_state = "untracked"
+    elif xy == "!!":
+        worktree_state = "ignored"
+    elif "D" in xy:
+        worktree_state = "deleted"
+    elif "A" in xy:
+        worktree_state = "added"
+    elif "R" in xy:
+        worktree_state = "renamed"
+    elif porcelain:
+        worktree_state = "modified"
+    else:
+        worktree_state = "clean"
+
+    result: dict[str, Any] = {
+        "status": "ok",
+        "repository_root": repo_root,
+        "relative_path": relative_path,
+        "branch": branch_stdout.strip() if branch_rc == 0 else None,
+        "head": head_stdout.strip() if head_rc == 0 else None,
+        "head_error": (head_error or head_stderr.strip()) if head_rc != 0 else None,
+        "tracked": tracked_rc == 0,
+        "worktree_state": worktree_state,
+        "index_status": xy[0] if porcelain else " ",
+        "working_tree_status": xy[1] if porcelain else " ",
+    }
+    result["last_commit"] = _git_last_commit(repo_root, relative_path) if tracked_rc == 0 else None
+
+    if blame_start_line is not None and blame_end_line is not None:
+        if tracked_rc != 0:
+            result["blame"] = {"status": "not_applicable", "reason": "Git does not track this path"}
+        else:
+            blame_rc, blame_stdout, blame_stderr, blame_error = _run_readonly_command(
+                ["git", "-C", repo_root, "blame", "--line-porcelain", "-L", f"{blame_start_line},{blame_end_line}", "--", relative_path],
+                timeout=15,
+            )
+            if blame_error or blame_rc != 0:
+                result["blame"] = {"status": "error", "error": blame_error or blame_stderr.strip()}
+            else:
+                result["blame"] = {
+                    "status": "ok",
+                    "start_line": blame_start_line,
+                    "end_line": blame_end_line,
+                    "lines": _parse_git_blame(blame_stdout),
+                }
+    return result
+
+
+@mcp.tool()
+def inspect_file(
+    path: str,
+    blame_start_line: Optional[int] = None,
+    blame_end_line: Optional[int] = None,
+) -> dict:
+    """Inspect one exact path for compact filesystem, content-type, and Git context.
+
+    Use this as the first call for coding-agent file context. It does not read
+    embedded EXIF/ID3/PDF tags; call read_metadata only when those format-specific
+    tags are needed. Git blame is intentionally opt-in and requires both inclusive
+    line bounds, so a request cannot accidentally return attribution for a large file.
+
+    Args:
+        path: One exact file or directory path. Glob patterns are not expanded.
+        blame_start_line: First line for optional Git blame (requires blame_end_line).
+        blame_end_line: Last inclusive line for optional Git blame (requires blame_start_line).
+
+    Returns:
+        A result with independent filesystem, content_type, and git sections.
+        A failed optional subsystem is reported in its own section.
+    """
+    original_path = Path(path).expanduser()
+    absolute_path = original_path.absolute()
+    resolved_path = original_path.resolve(strict=False)
+    result: dict[str, Any] = {
+        "path": {
+            "input": path,
+            "absolute": str(absolute_path),
+            "resolved": str(resolved_path),
+        }
+    }
+    filesystem = _filesystem_info(absolute_path)
+    result["filesystem"] = filesystem
+
+    try:
+        result["content_type"] = _content_type_info(absolute_path, filesystem)
+    except Exception as exc:
+        result["content_type"] = {"status": "error", "error": f"Content detection failed: {exc}"}
+
+    invalid_blame = (
+        (blame_start_line is None) != (blame_end_line is None)
+        or (blame_start_line is not None and blame_start_line < 1)
+        or (blame_end_line is not None and blame_end_line < blame_start_line)
+    )
+    if invalid_blame:
+        result["git"] = {
+            "status": "not_requested",
+            "blame": {
+                "status": "invalid_request",
+                "error": "Provide both blame_start_line and blame_end_line as an inclusive range starting at 1.",
+            },
+        }
+        return result
+
+    try:
+        result["git"] = _git_info(absolute_path, blame_start_line, blame_end_line)
+    except Exception as exc:
+        result["git"] = {"status": "error", "error": f"Git inspection failed: {exc}"}
+    return result
 
 
 @mcp.tool()
@@ -698,6 +1035,9 @@ def help() -> str:
     """Get information about available metadata_mcp tools and bulk operation support.
 
     Tools and backends:
+    - inspect_file:         Compact first-call context for one path: filesystem
+                              attributes, libmagic type detection, and Git state.
+                              Optional Git blame requires explicit line bounds.
     - read_metadata:        Read all metadata tags from any file (ExifTool — accepts globs)
     - write_metadata:       Write tag=value pairs — backend chosen by file extension:
                               ExifTool for images/video/PDF (accepts globs/dirs natively)
@@ -718,13 +1058,13 @@ def help() -> str:
         write_metadata(path="music/*.mp3", tags={"Artist": "Jim Lehmer"})
         exiftool_passthrough(arguments=["-r", "-all=", "exports/"])
     """
-    return "metadata_mcp — broad file metadata reader/writer. See tool docstrings for details."
+    return "metadata_mcp — use inspect_file first for compact filesystem, type, and Git context; use read_metadata for embedded format-specific tags. See tool docstrings for details."
 
 
 @mcp.tool()
 def version() -> str:
     """Return version information for the metadata_mcp server."""
-    return "2.0.0"
+    return "2.1.0"
 
 
 if __name__ == "__main__":

@@ -3,13 +3,33 @@
 **Author:** Jim Lehmer  
 **License:** MIT
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that reads and writes file metadata across a broad range of formats. Connect it to any MCP-compatible LLM client (Claude Desktop, Claude Code, etc.) and ask the model to read or write metadata on images, audio, video, documents, and text files — no knowledge of ExifTool, mutagen, or YAML required.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that gives coding agents compact file context and reads or writes embedded metadata across a broad range of formats. Connect it to any MCP-compatible client and inspect filesystem, content type, and Git facts before asking for format-specific tags on images, audio, video, documents, and text files.
 
 ---
 
 ## Why the name?
 
-This server started as a thin ExifTool wrapper. It has since grown backends for audio formats ExifTool can't write (mutagen) and text-based formats with no binary metadata section (HTML, Markdown). "exiftool_mcp" no longer described it; "metadata_mcp" does.
+This server started as a thin ExifTool wrapper. It has since grown a compact, cross-file context probe plus backends for audio formats ExifTool can't write (mutagen) and text-based formats with no binary metadata section (HTML, Markdown). "exiftool_mcp" no longer described it; "metadata_mcp" does.
+
+## First call for coding agents: `inspect_file`
+
+Use `inspect_file` for one exact path before reading source or embedded tags. It returns independently computed sections, so a missing optional command (such as Git or `file`) does not hide valid filesystem facts.
+
+```python
+# Compact file context: stat attributes, libmagic type, Git status, and last file commit
+inspect_file(path="server.py")
+
+# Attribute only the source lines relevant to a change request
+inspect_file(path="server.py", blame_start_line=85, blame_end_line=120)
+```
+
+Its default response includes:
+
+- **Filesystem** — normalized and resolved paths, kind, symlink status, size/allocation, permissions, owner IDs on POSIX, and UTC timestamps.
+- **Content type** — libmagic (`file`) description, MIME type, and encoding. If `file` is unavailable, extension-based values are returned only as an explicitly labeled fallback.
+- **Git** — worktree root, branch and HEAD, tracking/worktree status, and the last commit affecting the file. Files outside a Git worktree receive an explicit `not_repository` status.
+
+Git blame is never returned unless both inclusive line bounds are supplied. `inspect_file` does not return EXIF, ID3, PDF, or comparable embedded tags; use `read_metadata` for that potentially verbose data.
 
 ---
 
@@ -89,6 +109,16 @@ exiftool_passthrough(arguments=["-r", "-all=", "exports/"])
 ---
 
 ## Tools
+
+### `inspect_file`
+
+Compact, read-only context for one exact file or directory path. This is the preferred first tool for coding agents.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `path` | `str` | required | One exact path; glob patterns are not expanded |
+| `blame_start_line` | `int` | optional | First line for bounded Git blame; requires `blame_end_line` |
+| `blame_end_line` | `int` | optional | Last inclusive line for bounded Git blame; requires `blame_start_line` |
 
 ### `read_metadata`
 
@@ -182,6 +212,8 @@ Run arbitrary ExifTool CLI commands for operations not covered by the tools abov
 
 - Python 3.10+
 - [ExifTool](https://exiftool.org/) installed and on `PATH`
+- Git installed and on `PATH` for repository context and blame (optional)
+- A `file` command backed by libmagic for content sniffing (optional; extension fallback is labeled)
 - Python packages: `mcp[cli]`, `mutagen` (see `requirements.txt`)
 
 ---
@@ -241,6 +273,8 @@ python server.py --transport sse
 
 ## Example Prompts
 
+- *"Inspect this file before editing it; tell me its type, Git state, and last commit."*
+- *"Who last changed lines 85 through 120 of this file?"*
 - *"Read all the metadata from this photo and tell me what camera was used."*
 - *"Read the metadata from every photo in photos/ and summarize what cameras were used."*
 - *"Set the Comment field on this MP3 to 'ripped from vinyl'."*
