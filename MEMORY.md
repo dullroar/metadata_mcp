@@ -1,32 +1,11 @@
-# Project Memory
+# MEMORY.md
 
-> Version-controlled, cross-LLM continuity notes. Keep this file compact, factual, and useful to a future contributor.
+Non-obvious findings about this codebase and its operating environment, discovered during work but not designed for anywhere else — not in README.md (what it is and how to use it), DESIGN.md (architectural decisions), or agent-instruction files (rules). This is background context for whichever LLM works in this repository next, so it does not have to rediscover these findings the hard way.
 
-## Current context
+If you (an LLM) make a finding like the ones below — a gotcha, an environment quirk, or a non-obvious reason one component reads or uses another — add it here rather than only mentioning it in chat. Keep entries factual and dated; note when something might have been fixed since.
 
-- metadata_mcp is a FastMCP server for inspecting and editing file metadata.
-- Use inspect_file first for a compact, read-only filesystem, content-type, and Git-context view. Escalate to format-specific tools only when needed.
+## Findings
 
-## Durable implementation facts
-
-- inspect_file keeps filesystem, content-type, and Git failures isolated; Git blame is returned only when both inclusive line bounds are supplied.
-- Use read_document_attributes for semantic attributes in text-centric document formats. Its default output is compact; set include_full_metadata=True only when nested raw Pandoc metadata is needed.
-- Use read_metadata for embedded or container metadata, particularly PDF, OOXML/Office, ODF, EPUB, and legacy Word/OLE files. ExifTool remains the appropriate backend for those formats.
-- The project interpreter is .venv/bin/python; system python is unavailable in this checkout.
-- FastMCP tool registration is verified with await mcp.list_tools().
-
-## Working conventions
-
-- Keep sample-CLAUDE.md and sample-AGENTS.md byte-identical. When copied into another project, remove the sample- prefix.
-- Prefer bounded, explicit output. Do not return full nested metadata unless the caller opts in.
-- Run the full test suite after dependencies are available; skipped live-integration tests are not sufficient validation.
-
-## Evidence
-
-- 2026-09-20: Implemented and validated compact inspect_file routing and Pandoc-based document-attribute extraction in this checkout.
-- 2026-09-20: Repository documentation and tests confirm the compact-first tool-routing contract.
-
-## Open questions
-
-- None recorded.
-
+- 2026-09-20 — FastMCP registration checks must call await mcp.list_tools(); mcp.get_tools() raises AttributeError.
+- 2026-09-20 — This checkout requires .venv/bin/python; the system python executable is unavailable. Recheck if the environment is rebuilt.
+- 2026-09-20 — Pandoc cannot read PDF and did not expose DOCX subject/custom properties in local testing; route PDF, legacy Word/OLE, OOXML, ODF, and EPUB metadata reads through ExifTool-backed read_metadata instead.
