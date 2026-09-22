@@ -1,5 +1,7 @@
 # metadata_mcp
 
+For the tool-routing architecture and constraints, see [DESIGN.md](DESIGN.md).
+
 **Author:** Jim Lehmer  
 **License:** MIT
 
