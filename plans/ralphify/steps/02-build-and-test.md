@@ -1,6 +1,6 @@
 ---
 id: 02-build-and-test
-status: pending
+status: done
 depends_on: [01-adopt-context]
 touches:
   - Dockerfile
@@ -14,7 +14,9 @@ touches:
 lane: none
 requirements: [R2]
 gate: bash scripts/test_docker.sh && python3 scripts/check_context.py && git diff --check
-evidence: Gate passed on 2026-11-22 UTC. See Validation evidence.
+evidence: gate passed 2026-11-22 (driver-verified)
+claimed_by: codex cli-default
+claimed_at: "2026-11-22T21:05:30Z"
 ---
 
 # 02-build-and-test
