@@ -1,0 +1,41 @@
+# Secrets and local settings. Never track these.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.claude/settings.json
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Build output
+build/
+dist/
+out/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Plan-loop runtime files belong in ~/repo-work, not here. Guard against mistakes:
+driver.out
+.lock
+PAUSE
+STOP

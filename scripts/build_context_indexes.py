@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Generate the routing index inside each folder README that carries index markers.
 
+Run me when: I need the legacy README-only index command. Use build_indexes.py for all indexes.
+
 Every routed Markdown file declares `gist: "Read when: ..."` in its front matter.
 A README containing the BEGIN/END markers lists the Markdown files beneath its folder,
 except README.md files, and except anything under a child folder whose own README has
@@ -82,7 +84,7 @@ def main(argv: list[str]) -> int:
     for err in errors:
         print(f"ERROR {err}")
     if check and stale:
-        print("STALE generated index (run build_context_indexes.py): " + ", ".join(stale))
+        print("STALE generated README index (run: python3 scripts/build_indexes.py): " + ", ".join(stale))
     return 1 if errors or (check and stale) else 0
 
 
