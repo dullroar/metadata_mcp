@@ -1,13 +1,15 @@
 ---
 id: 03-verify-integration
-status: pending
+status: done
 depends_on: [02-build-and-test]
 touches:
   - plans/ralphify/steps/03-verify-integration.md
 lane: none
 requirements: [R3]
 gate: python3 scripts/check_context.py && bash scripts/test_docker.sh && git diff --check
-evidence: ""
+evidence: gate passed 2026-11-22 (driver-verified)
+claimed_by: codex cli-default
+claimed_at: "2026-11-22T21:07:18Z"
 ---
 
 # 03-verify-integration
