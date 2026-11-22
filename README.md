@@ -344,6 +344,33 @@ For a project that will read or manipulate many files, copy the template appropr
 mcp dev server.py
 ```
 
+## Build and test with Docker
+
+Run these commands from the repository root. Use Bash and a running Docker engine
+that can build and run Linux containers. The build needs access to the Ubuntu
+and Python package repositories. The image uses MCP 1.x for the server's
+FastMCP API.
+
+```bash
+docker build -t metadata-mcp .
+bash scripts/test_docker.sh
+```
+
+The test script builds from the current checkout. It runs the unit tests, an MCP
+stdio smoke test with Pandoc and ExifTool, and the context checks. The container
+runs as a normal user with no network access. The smoke test creates synthetic
+files in a temporary directory. Git metadata and the host virtual environment
+stay out of the image.
+
+To run the committed `ralphify` plan, install [ralph-looper] and use this command
+from the repository root. The runner also needs the Codex CLI and Docker access.
+
+```bash
+ralph-looper --repo "$PWD" --plan ralphify --agent codex
+```
+
+[ralph-looper]: https://github.com/dullroar/ralph-looper
+
 ---
 
 ## License

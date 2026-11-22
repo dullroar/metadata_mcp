@@ -1,6 +1,6 @@
 ---
 id: 02-build-and-test
-status: pending
+status: done
 depends_on: [01-adopt-context]
 touches:
   - Dockerfile
@@ -14,7 +14,9 @@ touches:
 lane: none
 requirements: [R2]
 gate: bash scripts/test_docker.sh && python3 scripts/check_context.py && git diff --check
-evidence: ""
+evidence: gate passed 2026-11-22 (driver-verified)
+claimed_by: codex cli-default
+claimed_at: "2026-11-22T21:05:30Z"
 ---
 
 # 02-build-and-test
@@ -28,3 +30,18 @@ Touches `Dockerfile`, `.dockerignore`, `README.md`, `scripts/test_docker.sh`, ge
 ## Repository gate
 
 Install ExifTool, Pandoc, and the existing Python requirements. Run `python3 -m unittest discover -s tests -v` and exercise the real binaries through a small stdio smoke if existing tests mock them. Verify a Pandoc semantic attribute and an ExifTool field from synthetic files. Keep real native commands on the required path and record any skips. Add test files under `tests/` as needed. Keep existing host entry points and metadata behavior.
+
+## Validation evidence
+
+- The full step gate passed from the linked worktree on 2026-11-22 UTC. The
+  container ran 17 tests with no skips. The context checks passed in the source
+  snapshot and on the host. The whitespace check passed.
+- The MCP stdio smoke test verified a Markdown title from Pandoc and an HTML
+  title from ExifTool. It used synthetic files and a container with no network access.
+- The initial clean install selected MCP 2.3.0 and failed to import FastMCP.
+  The Docker build uses the existing requirements with an MCP version below 2.
+  The passing build used MCP 1.30.0, Pandoc 3.1.3, and ExifTool 12.76.
+
+## Resume notes
+
+None.
