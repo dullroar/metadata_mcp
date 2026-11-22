@@ -1,4 +1,7 @@
-"""Shared helpers for the context-governance scripts (standard library only)."""
+"""Shared helpers for the repo scripts (standard library only).
+
+Run me when: never directly. Other scripts in this folder import it.
+"""
 from __future__ import annotations
 
 import re
@@ -7,24 +10,32 @@ from pathlib import Path
 
 BEGIN = "<!-- BEGIN GENERATED CONTEXT INDEX -->"
 END = "<!-- END GENERATED CONTEXT INDEX -->"
+INDEX_BEGIN = "<!-- BEGIN GENERATED INDEX -->"
+INDEX_END = "<!-- END GENERATED INDEX -->"
 SKIP_DIRS = {".git", ".venv", "node_modules", "build", "dist", "__pycache__", ".hypothesis"}
+PLAN_SKIP = {"archive"}
 
 
 def repo_root(start: Path | None = None) -> Path:
-    here = (start or Path.cwd()).resolve()
-    for candidate in [here, *here.parents]:
-        if (candidate / ".git").exists():
-            return candidate
-    return here
+    if start is not None:
+        return start.resolve()
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return Path.cwd().resolve()
+    return Path(result.stdout.rstrip("\n"))
 
 
 def markdown_files(root: Path) -> list[Path]:
     """Tracked and untracked-but-not-ignored Markdown files, falling back to a walk."""
     try:
         out = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "*.md"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.md"],
             cwd=root, capture_output=True, text=True, check=True,
-        ).stdout.split("\n")
+        ).stdout.split("\0")
         files = [root / line for line in out if line and not SKIP_DIRS & set(Path(line).parts)]
     except (OSError, subprocess.CalledProcessError):
         files = [p for p in root.rglob("*.md") if not SKIP_DIRS & set(p.relative_to(root).parts)]

@@ -1,6 +1,9 @@
-# Documentation index
+# Documents
 
-Open only the document whose **Read when** line matches the task.
+This folder holds design notes, references, and guides.
+
+- Read the design documents when changing tool routing or project boundaries.
+- Read the runner guide when preparing or running a plan. [ralph-looper guide](https://github.com/dullroar/ralph-looper#use)
 
 <!-- BEGIN GENERATED CONTEXT INDEX -->
 
