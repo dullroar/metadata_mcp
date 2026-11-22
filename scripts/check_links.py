@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Check local Markdown links and heading anchors in context files.
 
+Run me when: I changed or moved any Markdown file, and before every pull request.
+
 Scope: README.md, AGENTS.md, CLAUDE.md, docs/, memory/, references/, plans/, scripts/.
 Pass --all to check every Markdown file (authored content may carry older breakage).
 Usage: check_links.py [--all] [ROOT]
