@@ -1,6 +1,6 @@
 ---
 id: a02-apply
-status: blocked
+status: pending
 depends_on: [a01-audit]
 touches:
   - .dockerignore
