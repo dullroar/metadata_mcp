@@ -18,9 +18,9 @@ touches:
 lane: none
 gate: python3 scripts/check_context.py && python3 scripts/build_indexes.py --check && python3 scripts/secret_guard.py --tracked && grep -q '3a2e9f3d95136958c54f73c831e84b971fc9a054' scripts/controls-requirements.txt && test -s controls.toml && grep -q '^  check:' .github/workflows/context.yml && grep -q '^  docker:' .github/workflows/context.yml && grep -q 'secret_guard.py --tracked' .github/workflows/context.yml && ! grep -q 'continue-on-error' .github/workflows/context.yml && ! grep 'uses:' .github/workflows/context.yml | grep -vqE '@[0-9a-f]{40}' && grep -q 'cheapest executor' AGENTS.md && grep -q 'controls-adoption.md' docs/README.md && bash scripts/test_docker.sh && git diff --check
 requirements: [R2]
-claimed_by: ""
-claimed_at: ""
-evidence: "2026-11-24: check_context.py, build_indexes.py --check, secret_guard.py --tracked, workflow greps and git diff --check pass in the session. Added !controls.toml to .dockerignore. bash scripts/test_docker.sh not run (no Docker in session); the driver runs it."
+claimed_by: claude cli-default
+claimed_at: "2026-11-24T14:49:07Z"
+evidence: gate passed 2026-11-24 (driver-verified)
 ---
 
 # Adopt the pinned library in advisory mode
