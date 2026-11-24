@@ -1,6 +1,6 @@
 ---
 id: a04-verify
-status: pending
+status: done
 depends_on: [a03-probes]
 touches:
   - plans/adopt-controls/steps/a04-verify.md
@@ -10,7 +10,7 @@ gate: d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && git clone -q . "$d/clone" && 
 requirements: [R4]
 claimed_by: ""
 claimed_at: ""
-evidence: ""
+evidence: "2026-11-24 UTC, session checks: secret_guard.py --history = 0 findings (7 binary fixtures unscanned), exit 0; check_context.py ok (5 checks), exit 0; build_indexes.py --check exit 0; secret_guard.py --tracked = 0 findings, exit 0; install_hooks.sh --self-test ok, exit 0; python3 -m unittest discover -s tests = 23 run, 21 pass, 2 import errors (test_document_attributes and test_inspect_file: host has no 'mcp' module). The gate (clean clone and Docker) runs outside this session."
 ---
 
 # Verify the full gates from a clean clone
@@ -44,4 +44,8 @@ After the operator merges this plan, the operator runs `bash scripts/install_hoo
 
 ## Resume notes
 
-(none)
+history-findings=0
+
+- The Docker and clean-clone checks ran in the gate, not in this session. This session claims no Docker result.
+- The host has no `mcp` Python module. Two test modules (`test_document_attributes`, `test_inspect_file`) fail to import on the host. The Docker image has the module, so the gate runs them there.
+- The host tests that could import passed: 21 of 23 run.
