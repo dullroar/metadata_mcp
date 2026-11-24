@@ -1,8 +1,9 @@
 ---
 id: a02-apply
-status: blocked
+status: pending
 depends_on: [a01-audit]
 touches:
+  - .dockerignore
   - scripts/check_context.py
   - scripts/controls-requirements.txt
   - controls.toml
@@ -57,6 +58,10 @@ This is the first real use of the adoption tools in this repository. Record each
 
 Set `status: done`. Fill `evidence` with the gate command, the result and the date.
 If you cannot finish, write "Resume notes" below. Keep the status `in_progress`.
+
+## Operator change (2026-11-24)
+
+`.dockerignore` is an allowlist (it starts with `*` or `**`). The image does not get `controls.toml`, so `check_context.py` fails in the container with "manifest not found". You may now edit `.dockerignore`: add `!controls.toml` and any other file that `adopt apply` added and the image needs. Change nothing else in that file. Do not weaken the excludes for secrets (`.env`, `.aws`, `.git` and so on).
 
 ## Resume notes
 
