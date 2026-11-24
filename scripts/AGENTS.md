@@ -26,10 +26,14 @@ Read the list. Run only the scripts whose "Run me when" line matches your task.
   Run me when: I created or changed a plan or a step, and before a plan loop starts.
 * [ctx_common.py](./ctx_common.py)
   Run me when: never directly. Other scripts in this folder import it.
+* [install_hooks.sh](./install_hooks.sh)
+  Run me when: I cloned a repository, or the hooks are missing (check with --check).
 * [scan_context_secrets.py](./scan_context_secrets.py)
   Run me when: I need the old secret scan command. It runs the same checks as scan_secrets.py.
 * [scan_secrets.py](./scan_secrets.py)
   Run me when: I changed AGENTS.md, CLAUDE.md, docs/, memory/ or plans/, and before every pull request.
+* [secret_guard.py](./secret_guard.py)
+  Run me when: before a commit or a push (the hooks do it), in CI, before a merge, or to audit a repository for secrets.
 * [test_docker.sh](./test_docker.sh)
   Run me when: I need to build the image and run the project and context checks in Docker.
 
