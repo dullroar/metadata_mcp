@@ -269,6 +269,15 @@ source .venv/bin/activate      # macOS/Linux
 pip install -r requirements.txt
 ```
 
+On Windows, install the native tools with winget. Then restart the MCP client so it sees the new `PATH`. Cygwin is not needed.
+
+```powershell
+winget install OliverBetz.ExifTool
+winget install JohnMacFarlane.Pandoc
+```
+
+Git for Windows supplies `file` (libmagic) in its `usr\bin` folder. If `file` is not on `PATH`, `inspect_file` labels its content type as an extension fallback.
+
 ---
 
 ## MCP Client Configuration
