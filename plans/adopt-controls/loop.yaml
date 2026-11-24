@@ -1,0 +1,5 @@
+# Run settings for the adopt-controls plan. Claude Code reports notional cost on a subscription.
+jobs: 1
+max_step_usd: 10
+step_timeout_minutes: 60
+gate_timeout_minutes: 30
