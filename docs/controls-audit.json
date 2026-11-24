@@ -1,0 +1,35 @@
+{
+  "adoption_artifacts": {
+    "controls_job": false,
+    "hooks": true,
+    "manifest": false,
+    "pin": false,
+    "secret_guard": true,
+    "shim": false
+  },
+  "case_collisions": [],
+  "ci_files": [
+    ".github/workflows/context.yml"
+  ],
+  "classification": "partial",
+  "current_checks": [
+    "build_indexes.py",
+    "check_plan.py",
+    "check_links.py",
+    "scan_secrets.py"
+  ],
+  "languages": [
+    "python",
+    "shell"
+  ],
+  "reasons": [
+    "missing: shim, pin, manifest, controls_job"
+  ],
+  "repository": "a01-audit",
+  "schema_version": 1,
+  "template_derived": true,
+  "test_commands": [
+    "python3 -m unittest discover -s tests",
+    "docker build (Dockerfile)"
+  ]
+}
