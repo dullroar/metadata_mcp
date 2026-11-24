@@ -1,6 +1,6 @@
 ---
 id: a03-probes
-status: pending
+status: done
 depends_on: [a02-apply]
 touches:
   - docs/controls-adoption.md
@@ -8,9 +8,9 @@ touches:
 lane: none
 gate: python3 scripts/check_context.py && python3 scripts/build_indexes.py --check && python3 scripts/secret_guard.py --tracked && grep -q '^## Probes' docs/controls-adoption.md && grep -q '^## Rollback' docs/controls-adoption.md && grep -q '^## Receipt' docs/controls-adoption.md && for id in markdown.local-links context.index-freshness plans.schema security.secrets repo.forbidden-artifacts; do grep -q "$id" docs/controls-adoption.md || exit 1; done && grep -q '"control_pin": "3a2e9f3d95136958c54f73c831e84b971fc9a054"' docs/controls-adoption.md && git diff --check
 requirements: [R3]
-claimed_by: ""
-claimed_at: ""
-evidence: ""
+claimed_by: claude cli-default
+claimed_at: "2026-11-24T14:50:36Z"
+evidence: gate passed 2026-11-24 (driver-verified)
 ---
 
 # Prove the controls with known-bad probes, test the rollback and write the receipt
