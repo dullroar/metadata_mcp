@@ -125,8 +125,8 @@ def _check_exiftool() -> bool:
     import subprocess
     try:
         result = subprocess.run(
-            [EXIFTOOL_PATH, "--version"],
-            capture_output=True, text=True, timeout=5
+            [EXIFTOOL_PATH, "-ver"],
+            capture_output=True, text=True, timeout=15
         )
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):

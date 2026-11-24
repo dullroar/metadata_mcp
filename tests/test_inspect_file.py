@@ -20,7 +20,7 @@ class InspectFileTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.file = self.root / "example.py"
-        self.file.write_text("first = 1\nsecond = 2\n", encoding="utf-8")
+        self.file.write_bytes(b"first = 1\nsecond = 2\n")
 
     def tearDown(self):
         self.tempdir.cleanup()
