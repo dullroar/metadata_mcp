@@ -1,6 +1,6 @@
 ---
 id: a02-apply
-status: pending
+status: done
 depends_on: [a01-audit]
 touches:
   - .dockerignore
@@ -20,7 +20,7 @@ gate: python3 scripts/check_context.py && python3 scripts/build_indexes.py --che
 requirements: [R2]
 claimed_by: ""
 claimed_at: ""
-evidence: ""
+evidence: "Gate run without 'bash scripts/test_docker.sh' (no Docker in session): all other parts passed, 2026-11-24. Driver must run the Docker part."
 ---
 
 # Adopt the pinned library in advisory mode
@@ -65,4 +65,4 @@ If you cannot finish, write "Resume notes" below. Keep the status `in_progress`.
 
 ## Resume notes
 
-(none)
+The session cannot run Docker. The `bash scripts/test_docker.sh` part of the gate was not run. The Dockerfile cache step is untested.

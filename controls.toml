@@ -1,0 +1,3 @@
+schema_version = 1
+profile = "ci"
+enabled = ["context.index-freshness", "markdown.local-links", "plans.graph", "plans.schema", "repo.forbidden-artifacts", "security.personal-data", "security.secrets"]
