@@ -8,9 +8,9 @@ lane: none
 tier: light
 gate: d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && git clone -q . "$d/clone" && cd "$d/clone" && python3 scripts/check_context.py && python3 scripts/build_indexes.py --check && python3 scripts/secret_guard.py --tracked && bash scripts/install_hooks.sh --self-test && python3 -m unittest discover -s tests -p 'test_secret_guard.py' && bash scripts/test_docker.sh && cd - >/dev/null && grep -q 'history-findings=[0-9]' plans/adopt-controls/steps/a04-verify.md
 requirements: [R4]
-claimed_by: ""
-claimed_at: ""
-evidence: "2026-11-24 UTC, session checks: secret_guard.py --history = 0 findings (7 binary fixtures unscanned), exit 0; check_context.py ok (5 checks), exit 0; build_indexes.py --check exit 0; secret_guard.py --tracked = 0 findings, exit 0; install_hooks.sh --self-test ok, exit 0; python3 -m unittest discover -s tests = 23 run, 21 pass, 2 import errors (test_document_attributes and test_inspect_file: host has no 'mcp' module). The gate (clean clone and Docker) runs outside this session."
+claimed_by: claude cli-default
+claimed_at: "2026-11-24T14:51:27Z"
+evidence: gate passed 2026-11-24 (driver-verified)
 ---
 
 # Verify the full gates from a clean clone
