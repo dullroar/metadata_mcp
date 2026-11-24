@@ -17,4 +17,6 @@ RUN python3 -m venv /opt/venv \
 
 COPY . .
 USER dev
+# The run has no network. Build the pinned controls cache now, as user dev, so the shim finds it.
+RUN python3 -c "import sys; sys.path.insert(0, 'scripts'); import check_context as c; s, k = c.pinned(); c.ensure_environment(s, k)"
 CMD ["python3", "server.py"]
