@@ -1,6 +1,6 @@
 ---
 id: a01-audit
-status: pending
+status: done
 depends_on: [a00-secret-guard]
 touches:
   - docs/controls-audit.json
@@ -10,9 +10,9 @@ agent: script
 run: python3 -m deterministic_controls adopt audit --root . --format json > docs/controls-audit.json
 gate: python3 -c 'import json; d = json.load(open("docs/controls-audit.json")); assert "schema_version" in d and d["classification"] != "blocked", d.get("classification")' && python3 scripts/secret_guard.py --tracked && git diff --check
 requirements: [R2]
-claimed_by: ""
-claimed_at: ""
-evidence: ""
+claimed_by: script cli-default
+claimed_at: "2026-11-24T14:31:14Z"
+evidence: gate passed 2026-11-24 (driver-verified)
 ---
 
 # Audit the repository with the pinned library
