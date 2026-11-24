@@ -1,0 +1,2 @@
+# Run me when: I install or upgrade the pinned deterministic-controls library (the check_context.py shim reads this pin).
+python3 -m pip install "deterministic-controls @ git+https://github.com/dullroar/deterministic-controls@3a2e9f3d95136958c54f73c831e84b971fc9a054"

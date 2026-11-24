@@ -6,6 +6,24 @@ on:
 permissions:
   contents: read
 jobs:
+  controls:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Run the deterministic controls
+        run: python3 scripts/check_context.py
+      - name: Secret guard on all tracked files
+        run: python3 scripts/secret_guard.py --tracked
+      - name: Secret guard on every commit of the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/secret_guard.py --range "$BASE_SHA..$HEAD_SHA"
   check:
     runs-on: ubuntu-latest
     steps:

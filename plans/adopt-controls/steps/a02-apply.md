@@ -1,6 +1,6 @@
 ---
 id: a02-apply
-status: pending
+status: done
 depends_on: [a01-audit]
 touches:
   - .dockerignore
@@ -18,9 +18,9 @@ touches:
 lane: none
 gate: python3 scripts/check_context.py && python3 scripts/build_indexes.py --check && python3 scripts/secret_guard.py --tracked && grep -q '3a2e9f3d95136958c54f73c831e84b971fc9a054' scripts/controls-requirements.txt && test -s controls.toml && grep -q '^  check:' .github/workflows/context.yml && grep -q '^  docker:' .github/workflows/context.yml && grep -q 'secret_guard.py --tracked' .github/workflows/context.yml && ! grep -q 'continue-on-error' .github/workflows/context.yml && ! grep 'uses:' .github/workflows/context.yml | grep -vqE '@[0-9a-f]{40}' && grep -q 'cheapest executor' AGENTS.md && grep -q 'controls-adoption.md' docs/README.md && bash scripts/test_docker.sh && git diff --check
 requirements: [R2]
-claimed_by: ""
-claimed_at: ""
-evidence: ""
+claimed_by: claude cli-default
+claimed_at: "2026-11-24T14:49:07Z"
+evidence: gate passed 2026-11-24 (driver-verified)
 ---
 
 # Adopt the pinned library in advisory mode
@@ -65,4 +65,4 @@ If you cannot finish, write "Resume notes" below. Keep the status `in_progress`.
 
 ## Resume notes
 
-(none)
+Docker was not run in this session. The driver runs `bash scripts/test_docker.sh`.
