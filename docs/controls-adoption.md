@@ -28,6 +28,7 @@ This repository runs the pinned `deterministic-controls` library. The adoption i
 - `adopt apply` did not commit its changes. The step commit holds them.
 - The Docker run has no network and uses `--read-only`. The shim needs the network once. So the `Dockerfile` builds the cache at image build time, as user `dev`, after `COPY . .` and `USER dev`. The build has network access. The run only reads the cache.
 - The Docker run was not verified in the agent session, which cannot run Docker. The driver gate runs it. If the shim writes outside `/tmp` at run time, record the path here.
+- `.dockerignore` is an allowlist. The image did not get `controls.toml`, so the check failed in the container with "manifest not found". The step added `!controls.toml`. The excludes for secrets did not change.
 - `scripts/controls-requirements.txt` already had a `Run me when:` line from `apply`.
 
 ## Secret guard exceptions

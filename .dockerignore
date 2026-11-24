@@ -6,6 +6,7 @@
 !*.md
 !LICENSE
 !requirements.txt
+!controls.toml
 !server.py
 !docs/**
 !memory/**

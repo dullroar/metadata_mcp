@@ -1,6 +1,6 @@
 ---
 id: a02-apply
-status: pending
+status: done
 depends_on: [a01-audit]
 touches:
   - .dockerignore
@@ -20,7 +20,7 @@ gate: python3 scripts/check_context.py && python3 scripts/build_indexes.py --che
 requirements: [R2]
 claimed_by: ""
 claimed_at: ""
-evidence: ""
+evidence: "2026-11-24: check_context.py, build_indexes.py --check, secret_guard.py --tracked, workflow greps and git diff --check pass in the session. Added !controls.toml to .dockerignore. bash scripts/test_docker.sh not run (no Docker in session); the driver runs it."
 ---
 
 # Adopt the pinned library in advisory mode
@@ -65,4 +65,4 @@ If you cannot finish, write "Resume notes" below. Keep the status `in_progress`.
 
 ## Resume notes
 
-(none)
+Docker was not run in this session. The driver runs `bash scripts/test_docker.sh`.
